@@ -20,7 +20,12 @@ import {
   SHOW_CURSOR,
 } from "./colors.ts";
 import { printBanner, multiSelect, formatTime } from "./ui.ts";
-import { clearAutoskillsCache, installAll, loadRegistry } from "./installer.ts";
+import {
+  clearAutoskillsCache,
+  installAll,
+  loadRegistry,
+  securityCheckForSkillPath,
+} from "./installer.ts";
 import type { InstallSecurityCheck } from "./installer.ts";
 import { cleanupClaudeMd } from "./claude.ts";
 
@@ -159,15 +164,31 @@ function formatSkillLabel(skill: string, { styled = false }: { styled?: boolean 
   return `${muted(author)} ${gray("›")} ${cyan(bold(skillName))}`;
 }
 
+function securityWarningForSkill(skill: string): string | null {
+  const check = securityCheckForSkillPath(skill);
+  if (check?.status !== "warning") return null;
+
+  const findings = check.findings.map((finding) => finding.trim()).filter(Boolean);
+  const detail = [check.summary.trim(), findings.join("; ")].filter(Boolean).join(" ");
+  return detail || "The sync review found issues that should be checked.";
+}
+
 function printSkillsList(skills: SkillEntry[]): void {
   const INSTALLED_TAG = " (installed)";
+  const SECURITY_TAG = " (security check ⚠)";
   const entries = skills.map((s) => ({
     ...s,
     label: formatSkillLabel(s.skill),
     styledLabel: formatSkillLabel(s.skill, { styled: true }),
+    hasSecurityWarning: Boolean(securityWarningForSkill(s.skill)),
   }));
   const maxEffective = Math.max(
-    ...entries.map((e) => e.label.length + (e.installed ? INSTALLED_TAG.length : 0)),
+    ...entries.map(
+      (e) =>
+        e.label.length +
+        (e.installed ? INSTALLED_TAG.length : 0) +
+        (e.hasSecurityWarning ? SECURITY_TAG.length : 0),
+    ),
   );
   const newCount = skills.filter((s) => !s.installed).length;
   const installedCount = skills.length - newCount;
@@ -178,14 +199,18 @@ function printSkillsList(skills: SkillEntry[]): void {
   log(cyan("   ◆ ") + bold(`Skills to install `) + dim(countLabel));
   log();
   for (let i = 0; i < entries.length; i++) {
-    const { label, styledLabel, sources, installed } = entries[i];
+    const { label, styledLabel, sources, installed, hasSecurityWarning } = entries[i];
     const techSources = sources.filter((s) => !s.includes(" + "));
-    const tag = installed ? dim(INSTALLED_TAG) : "";
-    const effectiveLen = label.length + (installed ? INSTALLED_TAG.length : 0);
+    const installedTag = installed ? dim(INSTALLED_TAG) : "";
+    const securityTag = hasSecurityWarning ? yellow(SECURITY_TAG) : "";
+    const effectiveLen =
+      label.length +
+      (installed ? INSTALLED_TAG.length : 0) +
+      (hasSecurityWarning ? SECURITY_TAG.length : 0);
     const pad = " ".repeat(maxEffective - effectiveLen);
     const num = String(i + 1).padStart(2, " ");
     const sourceSuffix = techSources.length > 0 ? `  ${dim(`← ${techSources.join(", ")}`)}` : "";
-    log(dim(`   ${num}.`) + ` ${styledLabel}${tag}${pad}${sourceSuffix}`);
+    log(dim(`   ${num}.`) + ` ${styledLabel}${installedTag}${securityTag}${pad}${sourceSuffix}`);
   }
   log();
 }
@@ -232,24 +257,59 @@ function truncateVisible(value: string, width: number): string {
   return plain.slice(0, width - 1) + "…";
 }
 
-function formatSecurityFindings(check: InstallSecurityCheck): string {
-  const summary =
-    check.summary.trim() ||
-    (check.status === "warning"
-      ? "The sync review found issues that should be checked."
-      : "The sync review did not find security issues.");
-  if (check.findings.length === 0) return summary;
-  return `${summary} Findings: ${check.findings.join("; ")}`;
+function wrapText(value: string, width: number): string[] {
+  if (width <= 0) return [value];
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if (word.length > width) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      for (let i = 0; i < word.length; i += width) {
+        lines.push(word.slice(i, i + width));
+      }
+      continue;
+    }
+
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+
+  if (line) lines.push(line);
+  return lines;
+}
+
+function formatSecurityFindings(check: InstallSecurityCheck): string | null {
+  const findings = check.findings.map((finding) => finding.trim()).filter(Boolean);
+  if (findings.length === 0) return null;
+
+  const summary = check.summary.trim();
+  return [summary, findings.join("; ")].filter(Boolean).join(" ");
 }
 
 function printSecurityChecks(checks: InstallSecurityCheck[]): void {
-  if (checks.length === 0) return;
+  const checksWithFindings = checks
+    .map((check) => ({ check, findings: formatSecurityFindings(check) }))
+    .filter((entry): entry is { check: InstallSecurityCheck; findings: string } =>
+      Boolean(entry.findings),
+    );
+  if (checksWithFindings.length === 0) return;
 
-  const sorted = [...checks].sort((a, b) => a.name.localeCompare(b.name));
-  const skillWidth = Math.min(34, Math.max(5, ...sorted.map((c) => c.name.length)));
+  const sorted = checksWithFindings.sort((a, b) => a.check.name.localeCompare(b.check.name));
+  const skillWidth = Math.min(34, Math.max(5, ...sorted.map(({ check }) => check.name.length)));
   const checkWidth = 7;
   const terminalWidth = process.stdout.columns || 100;
-  const findingsWidth = Math.max(28, terminalWidth - skillWidth - checkWidth - 16);
+  const findingsWidth = Math.max(40, terminalWidth - skillWidth - checkWidth - 16);
 
   log();
   log(cyan("   ◆ ") + bold("Security checks"));
@@ -265,12 +325,17 @@ function printSecurityChecks(checks: InstallSecurityCheck[]): void {
     ),
   );
 
-  for (const check of sorted) {
+  for (const { check, findings } of sorted) {
     const status = check.status === "warning" ? yellow("warning") : green("ok");
-    const findings = truncateVisible(formatSecurityFindings(check), findingsWidth);
+    const lines = wrapText(findings, findingsWidth);
     log(
-      `   | ${visiblePad(truncateVisible(check.name, skillWidth), skillWidth)} | ${visiblePad(status, checkWidth)} | ${visiblePad(findings, findingsWidth)} |`,
+      `   | ${visiblePad(truncateVisible(check.name, skillWidth), skillWidth)} | ${visiblePad(status, checkWidth)} | ${visiblePad(lines[0], findingsWidth)} |`,
     );
+    for (const line of lines.slice(1)) {
+      log(
+        `   | ${visiblePad("", skillWidth)} | ${visiblePad("", checkWidth)} | ${visiblePad(line, findingsWidth)} |`,
+      );
+    }
   }
 }
 
@@ -360,17 +425,26 @@ async function selectSkills(skills: SkillEntry[], autoYes: boolean): Promise<Ski
   }
 
   const INSTALLED_TAG = " (installed)";
-  const labelCache = new Map<string, { label: string; styledLabel: string }>();
+  const SECURITY_TAG = " (security check ⚠)";
+  const labelCache = new Map<
+    string,
+    { label: string; styledLabel: string; hasSecurityWarning: boolean }
+  >();
   for (const s of skills) {
     labelCache.set(s.skill, {
       label: formatSkillLabel(s.skill),
       styledLabel: formatSkillLabel(s.skill, { styled: true }),
+      hasSecurityWarning: Boolean(securityWarningForSkill(s.skill)),
     });
   }
   const maxEffective = Math.max(
     ...skills.map((s) => {
-      const len = labelCache.get(s.skill)!.label.length;
-      return len + (s.installed ? INSTALLED_TAG.length : 0);
+      const cached = labelCache.get(s.skill)!;
+      return (
+        cached.label.length +
+        (s.installed ? INSTALLED_TAG.length : 0) +
+        (cached.hasSecurityWarning ? SECURITY_TAG.length : 0)
+      );
     }),
   );
 
@@ -385,10 +459,14 @@ async function selectSkills(skills: SkillEntry[], autoYes: boolean): Promise<Ski
 
   const selected = await multiSelect(skills, {
     labelFn: (s) => {
-      const { label, styledLabel } = labelCache.get(s.skill)!;
-      const tag = s.installed ? " " + dim("(installed)") : "";
-      const effectiveLen = label.length + (s.installed ? INSTALLED_TAG.length : 0);
-      return styledLabel + tag + " ".repeat(maxEffective - effectiveLen);
+      const { label, styledLabel, hasSecurityWarning } = labelCache.get(s.skill)!;
+      const installedTag = s.installed ? " " + dim("(installed)") : "";
+      const securityTag = hasSecurityWarning ? yellow(SECURITY_TAG) : "";
+      const effectiveLen =
+        label.length +
+        (s.installed ? INSTALLED_TAG.length : 0) +
+        (hasSecurityWarning ? SECURITY_TAG.length : 0);
+      return styledLabel + installedTag + securityTag + " ".repeat(maxEffective - effectiveLen);
     },
     hintFn: (s) => {
       const techSources = s.sources.filter((src) => !src.includes(" + "));
@@ -506,9 +584,6 @@ async function main(): Promise<void> {
     write(`\x1b[${selectedSkills.length + 1}B`);
   }
 
-  printSummary({ installed, failed, errors, elapsed, verbose });
-  printSecurityChecks(securityChecks);
-
   if (claudeCleanup.cleaned) {
     if (claudeCleanup.deleted) {
       log(dim("   Removed autoskills section from CLAUDE.md (file was empty, deleted)."));
@@ -517,6 +592,9 @@ async function main(): Promise<void> {
     }
     log();
   }
+
+  printSecurityChecks(securityChecks);
+  printSummary({ installed, failed, errors, elapsed, verbose });
 }
 
 main().catch((err: Error) => {

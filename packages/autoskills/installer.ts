@@ -236,6 +236,17 @@ function securityCheckForEntry(skillName: string, entry: RegistryEntry): Install
   };
 }
 
+export function securityCheckForSkillPath(skillPath: string): InstallSecurityCheck | null {
+  const { skillName } = parseSkillPath(skillPath);
+  if (!skillName) return null;
+
+  const registry = loadRegistry();
+  const entry = registry?.skills[skillName];
+  if (!entry) return null;
+
+  return securityCheckForEntry(skillName, entry);
+}
+
 function encodeRawPath(skillName: string, rel: string): string {
   return [skillName, ...rel.split("/")].map(encodeURIComponent).join("/");
 }

@@ -8,6 +8,7 @@ import {
   agentFolderFor,
   installAll,
   installSkill,
+  securityCheckForSkillPath,
   verifyRegistryEntry,
   _setRegistryDir,
 } from "../installer.ts";
@@ -259,6 +260,31 @@ describe("installSkill", () => {
     });
   });
 
+  it("returns security checks from the registry before installing", () => {
+    const regDir = join(tmp.path, "registry");
+    buildRegistry(regDir, [
+      {
+        name: "offer-warning-skill",
+        source: "owner/repo",
+        files: { "SKILL.md": "# warning" },
+        securityCheck: {
+          status: "warning",
+          findings: ["manual review"],
+          summary: "Needs manual review.",
+          checkedAt: new Date().toISOString(),
+        },
+      },
+    ]);
+    _setRegistryDir(regDir);
+
+    deepEqual(securityCheckForSkillPath("owner/repo/offer-warning-skill"), {
+      name: "offer-warning-skill",
+      status: "warning",
+      summary: "Needs manual review.",
+      findings: ["manual review"],
+    });
+  });
+
   it("collects security checks when installing multiple skills", async () => {
     const regDir = join(tmp.path, "registry");
     const projectDir = join(tmp.path, "project");
@@ -325,7 +351,17 @@ describe("installSkill", () => {
     const projectDir = join(tmp.path, "project");
     mkdirSync(projectDir, { recursive: true });
     buildRegistry(regDir, [
-      { name: "cached-skill", source: "owner/repo", files: { "SKILL.md": "# cached" } },
+      {
+        name: "cached-skill",
+        source: "owner/repo",
+        files: { "SKILL.md": "# cached" },
+        securityCheck: {
+          status: "warning",
+          findings: ["reinstall warning"],
+          summary: "Reinstalled skill needs review.",
+          checkedAt: new Date().toISOString(),
+        },
+      },
     ]);
     const installedDir = join(projectDir, ".agents", "skills", "cached-skill");
     mkdirSync(installedDir, { recursive: true });
@@ -342,6 +378,12 @@ describe("installSkill", () => {
     });
 
     ok(result.success, result.output);
+    deepEqual(result.securityCheck, {
+      name: "cached-skill",
+      status: "warning",
+      summary: "Reinstalled skill needs review.",
+      findings: ["reinstall warning"],
+    });
   });
 
   it("installs from the user cache without fetching", async () => {
