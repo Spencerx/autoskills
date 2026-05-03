@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-30T08:55:16.647Z",
+  "generatedAt": "2026-05-03T15:33:46.085Z",
   "reviewer": {
     "model": "gpt-5.4",
     "promptVersion": "1.0.0"
@@ -12794,6 +12794,32 @@
         "model": "gpt-5.4",
         "promptVersion": "1.0.0",
         "reviewedAt": "2026-04-18T05:19:34.433Z"
+      }
+    },
+    "bash-defensive-patterns": {
+      "source": "wshobson/agents",
+      "skillPath": "wshobson/agents/bash-defensive-patterns",
+      "commitSha": "ece811f23310a37ceb43496dbac0e244fe6845b6",
+      "files": [
+        "SKILL.md"
+      ],
+      "sha256": {
+        "SKILL.md": "f47bd7979a065f340c14bf410f390fdbceabe93f40ddedc908b8d8bc877aa8c9"
+      },
+      "bundleHash": "1f566c2d9c3b50a784b05d08f6b08ebfeb31f038e4d4173f2d488484edb058a6",
+      "review": {
+        "status": "approved",
+        "flags": [],
+        "summary": "review skipped (--no-review)",
+        "model": "gpt-5.4",
+        "promptVersion": "1.0.0",
+        "reviewedAt": "2026-05-03T15:31:35.332Z"
+      },
+      "securityCheck": {
+        "status": "ok",
+        "findings": [],
+        "summary": "review skipped (--no-review)",
+        "checkedAt": "2026-05-03T15:31:35.332Z"
       }
     }
   }

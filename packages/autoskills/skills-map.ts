@@ -11,6 +11,7 @@ export interface DetectConfig {
   packages?: string[];
   packagePatterns?: RegExp[];
   configFiles?: string[];
+  fileExtensions?: string[];
   gems?: string[];
   configFileContent?: ConfigFileContentBlock | ConfigFileContentBlock[];
 }
@@ -585,6 +586,14 @@ export const SKILLS_MAP: Technology[] = [
       "wshobson/agents/nodejs-backend-patterns",
       "sickn33/antigravity-awesome-skills/nodejs-best-practices",
     ],
+  },
+  {
+    id: "bash",
+    name: "Bash",
+    detect: {
+      fileExtensions: [".sh", ".bash"],
+    },
+    skills: ["wshobson/agents/bash-defensive-patterns"],
   },
   {
     id: "express",

@@ -280,6 +280,30 @@ describe("detectTechnologies", () => {
     ok(!detected.some((t) => t.id === "go"));
   });
 
+  it("detects Bash scripts from .sh files", () => {
+    writePackageJson(tmp.path);
+    writeFile(tmp.path, "scripts/deploy.sh", "#!/usr/bin/env bash\nset -euo pipefail\n");
+    const { detected } = detectTechnologies(tmp.path);
+    const bash = detected.find((t) => t.id === "bash");
+    ok(bash);
+    ok(bash.skills.includes("wshobson/agents/bash-defensive-patterns"));
+  });
+
+  it("detects Bash scripts from workspaces", () => {
+    writePackageJson(tmp.path, { workspaces: ["packages/*"] });
+    addWorkspace(tmp.path, "packages/api");
+    writeFile(tmp.path, "packages/api/scripts/setup.bash", "#!/usr/bin/env bash\n");
+    const { detected } = detectTechnologies(tmp.path);
+    ok(detected.some((t) => t.id === "bash"));
+  });
+
+  it("ignores Bash scripts inside skipped directories", () => {
+    writePackageJson(tmp.path);
+    writeFile(tmp.path, "node_modules/package/postinstall.sh", "#!/usr/bin/env bash\n");
+    const { detected } = detectTechnologies(tmp.path);
+    ok(!detected.some((t) => t.id === "bash"));
+  });
+
   it("detects Three.js from dependencies", () => {
     writePackageJson(tmp.path, { dependencies: { three: "^0.173.0" } });
     const { detected } = detectTechnologies(tmp.path);

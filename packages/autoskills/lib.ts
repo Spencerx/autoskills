@@ -195,6 +195,42 @@ function resolveConfigFileContentPaths(
   return (config.files || []).map((f) => join(projectDir, f));
 }
 
+// ── Project File Scanning ────────────────────────────────────
+
+function hasFileWithExtension(
+  projectDir: string,
+  extensions: string[],
+  maxDepth: number = 4,
+): boolean {
+  const normalized = new Set(
+    extensions.map((ext) => (ext.startsWith(".") ? ext : `.${ext}`).toLowerCase()),
+  );
+  const normalizedExtensions = [...normalized];
+
+  function scan(dir: string, depth: number): boolean {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+
+    for (const entry of entries) {
+      if (entry.isFile()) {
+        const lowerName = entry.name.toLowerCase();
+        if (normalizedExtensions.some((ext) => lowerName.endsWith(ext))) return true;
+      } else if (entry.isDirectory() && depth < maxDepth) {
+        if (SCAN_SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+        if (scan(join(dir, entry.name), depth + 1)) return true;
+      }
+    }
+
+    return false;
+  }
+
+  return scan(projectDir, 0);
+}
+
 // ── Frontend File Scanning ───────────────────────────────────
 
 export function hasWebFrontendFiles(projectDir: string, maxDepth: number = 3): boolean {
@@ -434,6 +470,7 @@ function detectTechnologiesInDir(
   const detected: Technology[] = [];
   const fileContentCache = new Map<string, string | null>();
   const existsCache = new Map<string, boolean>();
+  const fileExtensionCache = new Map<string, boolean>();
 
   function cachedRead(filePath: string): string | null {
     if (fileContentCache.has(filePath)) return fileContentCache.get(filePath)!;
@@ -468,6 +505,14 @@ function detectTechnologiesInDir(
 
     if (!found && tech.detect.configFiles) {
       found = tech.detect.configFiles.some((f) => cachedExists(join(dir, f)));
+    }
+
+    if (!found && tech.detect.fileExtensions) {
+      const key = tech.detect.fileExtensions.join("\0");
+      if (!fileExtensionCache.has(key)) {
+        fileExtensionCache.set(key, hasFileWithExtension(dir, tech.detect.fileExtensions));
+      }
+      found = fileExtensionCache.get(key)!;
     }
 
     if (!found && tech.detect.gems) {

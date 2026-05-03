@@ -101,6 +101,16 @@ describe("CLI", () => {
       ok(output.includes("Next.js"));
     });
 
+    it("detects Bash scripts and suggests defensive patterns", () => {
+      writePackageJson(tmp.path);
+      writeFile(tmp.path, "scripts/deploy.sh", "#!/usr/bin/env bash\nset -euo pipefail\n");
+
+      const output = run(["--dry-run"], tmp.path);
+
+      ok(output.includes("Bash"));
+      ok(output.includes("bash-defensive-patterns"));
+    });
+
     it("detects Astro from package.json", () => {
       writePackageJson(tmp.path, { dependencies: { astro: "^5" } });
 
