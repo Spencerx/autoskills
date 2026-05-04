@@ -471,6 +471,58 @@ describe("installSkill", () => {
     );
   });
 
+  it("normalizes Windows-style registry file paths before downloading", async () => {
+    const regDir = join(tmp.path, "registry");
+    const projectDir = join(tmp.path, "project");
+    mkdirSync(projectDir, { recursive: true });
+    buildRegistry(regDir, [
+      {
+        name: "windows-path-skill",
+        source: "owner/repo",
+        files: { "SKILL.md": "# raw", "references/notes.md": "notes" },
+      },
+    ]);
+    const manifestPath = join(regDir, "index.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    manifest.skills["windows-path-skill"].files = ["SKILL.md", "references\\notes.md"];
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    _setRegistryDir(regDir);
+
+    const prevCacheDir = process.env.AUTOSKILLS_CACHE_DIR;
+    process.env.AUTOSKILLS_CACHE_DIR = join(tmp.path, "windows-path-cache");
+    const seenUrls: string[] = [];
+    try {
+      const result = await installSkill("owner/repo/windows-path-skill", [], {
+        projectDir,
+        registryDir: join(tmp.path, "manifest-only"),
+        registryBaseUrl: "https://example.test/skills-registry",
+        fetchImpl: (async (url: string | URL | Request) => {
+          const href = typeof url === "string" || url instanceof URL ? String(url) : url.url;
+          seenUrls.push(href);
+          return fetchFromRegistry(regDir)(url);
+        }) as typeof fetch,
+      });
+
+      ok(result.success, result.output);
+      ok(
+        seenUrls.includes(
+          "https://example.test/skills-registry/windows-path-skill/references/notes.md",
+        ),
+      );
+      ok(seenUrls.every((url) => !url.includes("%5C") && !url.includes("\\")));
+      equal(
+        readFileSync(
+          join(projectDir, ".agents", "skills", "windows-path-skill", "references", "notes.md"),
+          "utf-8",
+        ),
+        "notes",
+      );
+    } finally {
+      if (prevCacheDir === undefined) delete process.env.AUTOSKILLS_CACHE_DIR;
+      else process.env.AUTOSKILLS_CACHE_DIR = prevCacheDir;
+    }
+  });
+
   it("falls back to the main registry mirror when the release registry mirror is missing files", async () => {
     const regDir = join(tmp.path, "registry");
     const projectDir = join(tmp.path, "project");

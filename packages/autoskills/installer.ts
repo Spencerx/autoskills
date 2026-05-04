@@ -126,17 +126,18 @@ export function verifyRegistryEntry(
     return { ok: false, reason: `missing directory ${skillDir}` };
   }
   for (const rel of entry.files) {
-    const abs = join(skillDir, rel);
+    const normalizedRel = normalizeRegistryRelPath(rel);
+    const abs = join(skillDir, ...normalizedRel.split("/"));
     if (!existsSync(abs)) {
-      return { ok: false, reason: `missing file ${rel}` };
+      return { ok: false, reason: `missing file ${normalizedRel}` };
     }
-    const expected = entry.sha256[rel];
+    const expected = entry.sha256[rel] || entry.sha256[normalizedRel];
     if (!expected) {
-      return { ok: false, reason: `no recorded hash for ${rel}` };
+      return { ok: false, reason: `no recorded hash for ${normalizedRel}` };
     }
     const actual = sha256File(abs);
     if (actual !== expected) {
-      return { ok: false, reason: `hash mismatch for ${rel}` };
+      return { ok: false, reason: `hash mismatch for ${normalizedRel}` };
     }
   }
   return { ok: true };
@@ -171,6 +172,10 @@ interface InstallOptions {
 
 function relPathFromTo(from: string, to: string): string {
   const rel = relative(from, to);
+  return rel.split("\\").join("/");
+}
+
+function normalizeRegistryRelPath(rel: string): string {
   return rel.split("\\").join("/");
 }
 
@@ -248,7 +253,7 @@ export function securityCheckForSkillPath(skillPath: string): InstallSecurityChe
 }
 
 function encodeRawPath(skillName: string, rel: string): string {
-  return [skillName, ...rel.split("/")].map(encodeURIComponent).join("/");
+  return [skillName, ...normalizeRegistryRelPath(rel).split("/")].map(encodeURIComponent).join("/");
 }
 
 function githubDownloadHeaders(url: string): HeadersInit {
@@ -270,19 +275,21 @@ async function downloadRegistryFile(
   rel: string,
   opts: InstallOptions,
 ): Promise<{ buf: Buffer; url: string }> {
-  if (isDisallowedSkillFile(rel)) {
-    throw new Error(`refusing to download disallowed skill archive: ${rel}`);
+  const normalizedRel = normalizeRegistryRelPath(rel);
+
+  if (isDisallowedSkillFile(normalizedRel)) {
+    throw new Error(`refusing to download disallowed skill archive: ${normalizedRel}`);
   }
 
-  const expected = entry.sha256[rel];
+  const expected = entry.sha256[rel] || entry.sha256[normalizedRel];
   if (!expected) {
-    throw new Error(`no recorded hash for ${rel}`);
+    throw new Error(`no recorded hash for ${normalizedRel}`);
   }
 
   const fetchFile = opts.fetchImpl || fetch;
   const errors = [];
   for (const baseUrl of getRegistryRawBaseUrls(opts)) {
-    const url = `${baseUrl}/${encodeRawPath(skillName, rel)}`;
+    const url = `${baseUrl}/${encodeRawPath(skillName, normalizedRel)}`;
     opts.onTrace?.(`GET ${url}`);
     const res = await fetchFile(url, {
       headers: githubDownloadHeaders(url),
@@ -296,7 +303,7 @@ async function downloadRegistryFile(
         );
       }
       errors.push(`${res.status} ${res.statusText} from ${baseUrl}`);
-      opts.onTrace?.(`miss ${rel}: ${res.status} ${res.statusText} from ${baseUrl}`);
+      opts.onTrace?.(`miss ${normalizedRel}: ${res.status} ${res.statusText} from ${baseUrl}`);
       continue;
     }
 
@@ -304,14 +311,14 @@ async function downloadRegistryFile(
     const actual = sha256Buffer(buf);
     if (actual !== expected) {
       errors.push(`hash mismatch from ${baseUrl}`);
-      opts.onTrace?.(`hash mismatch for ${rel} from ${baseUrl}`);
+      opts.onTrace?.(`hash mismatch for ${normalizedRel} from ${baseUrl}`);
       continue;
     }
-    opts.onTrace?.(`downloaded ${rel} from ${url}`);
+    opts.onTrace?.(`downloaded ${normalizedRel} from ${url}`);
     return { buf, url };
   }
 
-  throw new Error(`download failed for ${rel}: ${errors.join("; ")}`);
+  throw new Error(`download failed for ${normalizedRel}: ${errors.join("; ")}`);
 }
 
 async function downloadRegistryEntry(
@@ -322,7 +329,10 @@ async function downloadRegistryEntry(
 ): Promise<void> {
   const files = [];
   for (const rel of entry.files) {
-    files.push({ rel, ...(await downloadRegistryFile(skillName, entry, rel, opts)) });
+    files.push({
+      rel: normalizeRegistryRelPath(rel),
+      ...(await downloadRegistryFile(skillName, entry, rel, opts)),
+    });
   }
 
   const bundleHash = createHash("sha256")
@@ -339,7 +349,7 @@ async function downloadRegistryEntry(
 
   rmSync(destDir, { recursive: true, force: true });
   for (const { rel, buf } of files) {
-    const dest = join(destDir, rel);
+    const dest = join(destDir, ...rel.split("/"));
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, buf);
   }
